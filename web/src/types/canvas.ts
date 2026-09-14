@@ -52,6 +52,7 @@ export type CanvasNodeMetadata = {
     errorDetails?: string;
     fontSize?: number;
     generationMode?: CanvasGenerationMode;
+    reversePrompt?: { imageModel: string };
     generationType?: CanvasImageGenerationType;
     model?: string;
     reasoningEffort?: "auto" | "low" | "medium" | "high" | "xhigh";

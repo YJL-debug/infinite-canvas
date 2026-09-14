@@ -6,6 +6,8 @@ import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
+import { requestReversePrompt } from "@/services/api/reverse-prompt";
+import { createReversePromptOutputs, parseReversePrompt } from "@/lib/canvas/canvas-reverse-prompt";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { createVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
 import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -1848,35 +1850,35 @@ function InfiniteCanvasPage() {
             }
 
             const gap = 96;
-            const textSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
             const configSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Config];
             const centerY = node.position.y + node.height / 2;
-            const textNode = {
-                ...createCanvasNode(CanvasNodeType.Text, { x: node.position.x + node.width + gap + textSpec.width / 2, y: centerY }, { content: t("canvas.projectPage.reversePreset"), prompt: t("canvas.projectPage.reversePreset"), status: NODE_STATUS_SUCCESS, fontSize: 14 }),
-                title: t("canvas.projectPage.reverseTitle"),
-            };
             const configNode = {
                 ...createCanvasNode(
                     CanvasNodeType.Config,
-                    { x: textNode.position.x + textNode.width + gap + configSpec.width / 2, y: centerY },
+                    { x: node.position.x + node.width + gap + configSpec.width / 2, y: centerY },
                     {
                         generationMode: "text",
+                        reversePrompt: { imageModel: buildGenerationConfig(effectiveConfig, node, "image").model },
                         model: effectiveConfig.textModel || effectiveConfig.model || defaultConfig.textModel,
                         count: 1,
-                        composerContent: t("canvas.reverseComposer", { imageId: node.id, textId: textNode.id }),
+                        composerContent: `@[node:${node.id}]`,
                     },
                 ),
                 title: t("canvas.projectPage.reverseConfigTitle"),
             };
 
-            setNodes((prev) => [...prev, textNode, configNode]);
-            setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: configNode.id }, { id: nanoid(), fromNodeId: textNode.id, toNodeId: configNode.id }]);
+            const nextNodes = [...nodesRef.current, configNode];
+            const nextConnections = [...connectionsRef.current, { id: nanoid(), fromNodeId: node.id, toNodeId: configNode.id }];
+            nodesRef.current = nextNodes;
+            connectionsRef.current = nextConnections;
+            setNodes(nextNodes);
+            setConnections(nextConnections);
             setSelectedNodeIds(new Set([configNode.id]));
             setSelectedConnectionId(null);
             setDialogNodeId(configNode.id);
             setContextMenu(null);
         },
-        [effectiveConfig.model, effectiveConfig.textModel, message, t],
+        [effectiveConfig, message, t],
     );
 
     const cropImageNode = useCallback(async (node: CanvasNodeData, crop: CanvasImageCropRect) => {
@@ -2320,25 +2322,18 @@ function InfiniteCanvasPage() {
             const runController = startGenerationRequest(nodeId, nodeId, nodeId);
             const sourceTextContent = sourceNode?.type === CanvasNodeType.Text ? sourceNode.metadata?.content?.trim() || "" : "";
             const editingTextNode = mode === "text" && Boolean(sourceTextContent);
-            const generationContext = await hydrateNodeGenerationContext(
-                buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, editingTextNode ? t("canvas.projectPage.editTextPrompt", { source: sourceTextContent, prompt }) : prompt),
-            );
-            const effectivePrompt = generationContext.prompt.trim();
-            if (runController.signal.aborted) {
-                finishGenerationRequest(nodeId, runController);
-                setRunningNodeId(null);
-                return;
-            }
             const markSourceStatus = sourceNode?.type !== CanvasNodeType.Image && !editingTextNode;
-            if (!effectivePrompt && (mode === "text" || mode === "audio")) {
-                finishGenerationRequest(nodeId, runController);
-                setRunningNodeId(null);
-                return;
-            }
             let pendingChildIds: string[] = [];
-            if (markSourceStatus) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...(node.type === CanvasNodeType.Config ? {} : { prompt }), status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)));
 
             try {
+                // 读取图片也属于生成过程；存储读取失败时必须释放运行状态并显示原因。
+                const generationContext = await hydrateNodeGenerationContext(
+                    buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, editingTextNode ? t("canvas.projectPage.editTextPrompt", { source: sourceTextContent, prompt }) : prompt),
+                );
+                const effectivePrompt = generationContext.prompt.trim();
+                if (runController.signal.aborted || (!effectivePrompt && (mode === "text" || mode === "audio"))) return;
+                if (markSourceStatus) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...(node.type === CanvasNodeType.Config ? {} : { prompt }), status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)));
+
                 if (mode === "image") {
                     const count = getGenerationCount(generationConfig.count);
                     const isConfigNode = sourceNode?.type === CanvasNodeType.Config;
@@ -2561,6 +2556,23 @@ function InfiniteCanvasPage() {
                     } finally {
                         finishGenerationRequest(audioId, controller);
                     }
+                    return;
+                }
+
+                if (sourceNode?.type === CanvasNodeType.Config && sourceNode.metadata?.reversePrompt) {
+                    const answer = await requestReversePrompt(generationConfig, buildNodeResponseMessages({ ...generationContext, prompt: effectivePrompt }), runController.signal);
+                    if (runController.signal.aborted || !nodesRef.current.some((node) => node.id === nodeId)) return;
+                    // 原始回复先保存，格式不符时仍可核对模型究竟返回了什么。
+                    setNodes((prev) => prev.map((node) => node.id === nodeId ? { ...node, metadata: { ...node.metadata, content: answer } } : node));
+                    const result = parseReversePrompt(answer);
+                    const imageConfig = buildGenerationConfig(effectiveConfig, { ...sourceNode, metadata: { model: sourceNode.metadata.reversePrompt.imageModel } }, "image");
+                    const output = createReversePromptOutputs(sourceNode, result, imageConfig, generationConfig);
+                    setNodes((prev) => [...prev.map((node) => node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node), ...output.nodes]);
+                    setConnections((prev) => [...prev, ...output.connections]);
+                    setSelectedNodeIds(new Set([output.imageNode.id]));
+                    setSelectedConnectionId(null);
+                    setDialogNodeId(output.imageNode.id);
+                    message.success("反推完成：可编辑中文提示词和负面词，再点击生图配置生成。");
                     return;
                 }
 
