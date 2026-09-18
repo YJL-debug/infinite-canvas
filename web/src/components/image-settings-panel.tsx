@@ -24,12 +24,13 @@ type ImageSettingsPanelProps = {
     onConfigChange: (key: "quality" | "size" | "count" | "background", value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
+    showCount?: boolean;
     className?: string;
     maxCount?: number;
     quickCount?: number;
 };
 
-export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10 }: ImageSettingsPanelProps) {
+export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, showCount = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10 }: ImageSettingsPanelProps) {
     const { t } = useTranslation();
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
     const quality = config.quality || "auto";
@@ -128,7 +129,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         <Switch size="small" checked={transparentBackground} onChange={(checked) => onConfigChange("background", checked ? "transparent" : "")} />
                     </span>
                 </div>
-                <div className="space-y-2.5">
+                {showCount ? <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.count")}</SettingTitle>
                     <div className="grid grid-cols-4 gap-2.5">
                         {Array.from({ length: quickCount }, (_, index) => index + 1).map((value) => (
@@ -138,7 +139,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         ))}
                         <CountInput value={count} max={maxCount} theme={theme} onChange={(value) => onConfigChange("count", String(value || 1))} />
                     </div>
-                </div>
+                </div> : null}
             </div>
         </ImageSettingsTheme>
     );

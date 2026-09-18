@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { ArrowUp, LoaderCircle, Maximize2, Square } from "lucide-react";
-import { Button, Modal, Tooltip } from "antd";
+import { Button, Modal, Segmented, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, resolveModelForCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { batchEditSources } from "@/lib/canvas/batch-image-edit";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
@@ -44,15 +45,18 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
     const config = buildNodeConfig(globalConfig, node, mode);
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
+    const hasImageGroup = hasImageContent && (node.metadata?.images?.length || 0) > 1;
+    const batchCount = hasImageGroup ? batchEditSources(node).length : 0;
+    const batchEdit = mode === "image" && hasImageGroup && Boolean(node.metadata?.batchEditImages);
     const isEditingExistingContent = hasTextContent || hasImageContent;
     const [prompt, setPrompt] = useState(node.metadata?.composerContent ?? node.metadata?.prompt ?? "");
     const [expanded, setExpanded] = useState(false);
 
-    // Restore prompts only when switching nodes; preserve the current input after generation on the same node.
+    // Restore the edit draft when switching nodes or edit scope, without replacing it as results arrive.
     useEffect(() => {
         setPrompt(node.metadata?.composerContent ?? node.metadata?.prompt ?? "");
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [node.id]);
+    }, [node.id, node.metadata?.batchEditImages]);
 
     const updatePrompt = (value: string) => {
         setPrompt(value);
@@ -80,6 +84,12 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
             onWheel={(event) => event.stopPropagation()}
         >
             <CanvasNodeReferenceBar nodeId={node.id} nodes={nodes} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={onStartReferenceSelection} />
+            {mode === "image" && hasImageGroup ? (
+                <div className="mb-2 space-y-2">
+                    <Segmented size="small" block disabled={isRunning} value={batchEdit ? "batch" : "primary"} onChange={(value) => onConfigChange(node.id, { batchEditImages: value === "batch" })} options={[{ value: "primary", label: t("canvas.batchEdit.primary") }, { value: "batch", label: t("canvas.batchEdit.scope", { count: batchCount }), disabled: batchCount === 0 }]} />
+                    {batchEdit ? <p className="text-xs leading-5 opacity-70">{t("canvas.batchEdit.hint", { count: batchCount })}</p> : null}
+                </div>
+            ) : null}
             <CanvasPromptChipInput
                 value={prompt}
                 references={mentionReferences}
@@ -101,6 +111,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                             <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" onMissingConfig={() => openConfigDialog(true)} className="max-w-[190px]" />
                             <CanvasImageSettingsPopover
                                 config={config}
+                                showCount={!batchEdit}
                                 placement="topLeft"
                                 buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3"
                                 onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })}
@@ -131,7 +142,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, onPromptChange, 
                     danger={isRunning}
                     disabled={!isRunning && !prompt.trim()}
                     onClick={() => (isRunning ? onStop(node.id) : submit())}
-                    aria-label={t(isRunning ? "canvas.promptPanel.stopGeneration" : "canvas.promptPanel.generate")}
+                    aria-label={isRunning ? t("canvas.promptPanel.stopGeneration") : batchEdit ? t("canvas.batchEdit.generate", { count: batchCount }) : t("canvas.promptPanel.generate")}
                 >
                     <span className="flex items-center gap-1.5">
                         {isRunning ? (

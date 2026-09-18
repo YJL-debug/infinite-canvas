@@ -24,12 +24,12 @@ type ResponseToolCall = {
     thoughtSignature?: string;
 };
 
-type ResponseInputMessage =
+export type ResponseInputMessage =
     | AiTextMessage
     | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string }
     | { role: "tool"; tool_call_id: string; content: string };
 
-type ResponseFunctionTool = {
+export type ResponseFunctionTool = {
     type: "function";
     function: {
         name: string;
@@ -883,6 +883,24 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
         }, onDelta, options)).content || apiText("noContent");
         if (answer === apiText("noContent")) onDelta(answer);
         return answer;
+    } catch (error) {
+        throw new Error(readAxiosError(error, apiText("requestFailed")));
+    }
+}
+
+export async function requestTextWithTools(config: AiConfig, messages: ResponseInputMessage[], tools: ResponseFunctionTool[], options?: RequestOptions): Promise<ToolResponseResult> {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.textModel);
+    if (resolveModelScript(config, config.model || config.textModel)) throw new Error("Skill 读取参考文件需要工具调用，请在该模型配置中使用默认接口调用方式。");
+    try {
+        if (requestConfig.apiFormat === "gemini") {
+            return await requestGeminiStreamingResponse(requestConfig, toGeminiBody(requestConfig, messages, toGeminiToolOptions(tools, "auto")), undefined, options);
+        }
+        return await requestStreamingResponse(requestConfig, {
+            model: requestConfig.model,
+            input: toResponseInput(withSystemMessage(requestConfig, messages)),
+            tools: tools.map(toResponseTool),
+            ...(requestConfig.reasoningEffort === "auto" ? {} : { reasoning: { effort: requestConfig.reasoningEffort } }),
+        }, undefined, options);
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("requestFailed")));
     }

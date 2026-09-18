@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Settings2, Square, Video } from "lucide-react";
-import { Button, Segmented } from "antd";
+import { Button, Segmented, Switch } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { ModelPicker } from "@/components/model-picker";
@@ -103,11 +103,19 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                 {mode === "video" ? (
                     <CanvasVideoSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                 ) : mode === "image" ? (
-                    <CanvasImageSettingsPopover config={config} placement="topRight" autoAdjustOverflow={false} buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })} />
+                    <CanvasImageSettingsPopover config={config} placement="topRight" autoAdjustOverflow={false} buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })}>
+                        <div className="mb-4 space-y-2 text-xs">
+                            <label className="flex items-center justify-between gap-3">
+                                <span>{t("canvas.randomImage.label")}</span>
+                                <Switch size="small" aria-label={t("canvas.randomImage.label")} checked={Boolean(node.metadata?.randomizeImage)} disabled={isRunning || (!node.metadata?.randomizeImage && inputSummary.imageCount > 0)} onChange={(randomizeImage) => onConfigChange(node.id, { randomizeImage })} />
+                            </label>
+                            <p className="leading-5 opacity-70">{t("canvas.randomImage.hint")}</p>
+                        </div>
+                    </CanvasImageSettingsPopover>
                 ) : mode === "audio" ? (
                     <CanvasAudioSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                 ) : (
-                    <CanvasTextSettingsPopover config={config} count={node.metadata?.textCount || 1} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(_, value) => onConfigChange(node.id, { reasoningEffort: value })} onCountChange={(textCount) => onConfigChange(node.id, { textCount })} />
+                    <CanvasTextSettingsPopover config={config} count={node.metadata?.textCount || 1} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(_, value) => onConfigChange(node.id, { reasoningEffort: value })} onCountChange={node.metadata?.reversePrompt ? undefined : (textCount) => onConfigChange(node.id, { textCount })} />
                 )}
             </div>
 

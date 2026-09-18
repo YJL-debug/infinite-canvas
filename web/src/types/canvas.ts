@@ -25,8 +25,15 @@ export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
 export type CanvasImageGenerationType = "generation" | "edit";
 
+export type RandomImageVariation = { character: string; style: string };
+
 export type CanvasNodeImage = {
     id: string;
+    references?: string[];
+    sourceImageId?: string;
+    sourceImageIndex?: number;
+    prompt?: string;
+    randomImageVariation?: RandomImageVariation;
     status: CanvasNodeStatus;
     errorDetails?: string;
     content: string;
@@ -45,6 +52,13 @@ export type CanvasNodeText = {
 };
 
 export type CanvasNodeMetadata = {
+    batchEditImages?: boolean;
+    sourceImageId?: string;
+    sourceImageIndex?: number;
+    randomizeImage?: boolean;
+    lastRandomImageVariation?: RandomImageVariation;
+    randomImageVariation?: RandomImageVariation;
+    originalPrompt?: string;
     content?: string;
     composerContent?: string;
     prompt?: string;
@@ -52,6 +66,7 @@ export type CanvasNodeMetadata = {
     errorDetails?: string;
     fontSize?: number;
     generationMode?: CanvasGenerationMode;
+    reversePrompt?: { imageModel: string };
     generationType?: CanvasImageGenerationType;
     model?: string;
     reasoningEffort?: "auto" | "low" | "medium" | "high" | "xhigh";
@@ -82,7 +97,7 @@ export type CanvasNodeMetadata = {
     bytes?: number;
     durationMs?: number;
     videoTaskId?: string;
-    videoTaskProvider?: "openai" | "gemini";
+    videoTaskProvider?: "openai" | "xai" | "gemini";
     groupId?: string;
     interactive?: boolean; // Plugin node interaction/move state; see CanvasNodeDefinition.interactionToggle.
 };

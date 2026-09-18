@@ -14,12 +14,13 @@ import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 type VideoResponse = { id: string; status?: string; error?: { message?: string }; url?: string; result_url?: string; video_url?: string; content?: { video_url?: string; url?: string } | null };
 type ApiVideoResponse = VideoResponse | { code?: number | string; data?: VideoResponse | null; msg?: string; message?: string; error?: { message?: string } };
 type ApiEnvelope<T> = T | { code?: number | string; data?: T | null; msg?: string; message?: string; error?: { message?: string } };
+type XaiVideoResponse = { request_id?: string; status?: string; video?: { url?: string }; error?: unknown };
 type RequestOptions = { signal?: AbortSignal };
 type VideoMediaOptions = RequestOptions & { videos?: ReferenceVideo[]; audios?: ReferenceAudio[] };
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
-export type VideoGenerationTask = { id: string; provider: "openai" | "gemini" | "plugin"; model: string };
+export type VideoGenerationTask = { id: string; provider: "openai" | "xai" | "gemini" | "plugin"; model: string };
 type GeminiInlineData = { bytesBase64Encoded: string; mimeType: string };
 type GeminiVideoOperation = {
     name?: string;
@@ -76,6 +77,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     if (script) return createPluginVideoTask(requestConfig, selectedModel, script, prompt, references, options);
     assertVideoConfig(requestConfig, requestConfig.model);
     if (requestConfig.apiFormat === "gemini") return createGeminiVideoTask(requestConfig, selectedModel, prompt, references, options);
+    if (/^grok-imagine-video(?:-|$)/.test(requestConfig.model)) return createXaiVideoTask(requestConfig, selectedModel, prompt, references, options);
     return createOpenAIVideoTask(requestConfig, selectedModel, prompt, references, options);
 }
 
@@ -87,7 +89,44 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
     const requestConfig = resolveModelRequestConfig(config, task.model);
     assertVideoConfig(requestConfig, requestConfig.model);
     if (task.provider === "gemini") return pollGeminiVideoTask(requestConfig, task, options);
+    if (task.provider === "xai") return pollXaiVideoTask(requestConfig, task, options);
     return pollOpenAIVideoTask(requestConfig, task, options);
+}
+
+async function createXaiVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
+    if (options?.videos?.length || options?.audios?.length) throw new Error("Grok 当前的视频生成接入支持图片参考，请移除视频和音频参考后再生成。");
+    const images = await Promise.all(references.map((image) => imageToDataUrl(image)));
+    const mode = resolveVideoMode(config.videoMode, images.length);
+    // Grok 使用原生 JSON 视频协议；表单上传和 OpenAI 的任务字段会在 cpa 被拒绝或漏掉参考图。
+    const body = {
+        model: config.model,
+        prompt,
+        duration: Number(normalizeVideoSeconds(config.videoSeconds)),
+        aspect_ratio: videoAspectRatio(config.size),
+        resolution: normalizeVideoResolution(config.vquality),
+        ...(mode === "reference"
+            ? { reference_images: images.map((url) => ({ url })) }
+            : { ...(images[0] ? { image: { url: images[0] } } : {}), ...(images[1] ? { last_frame: { url: images[1] } } : {}) }),
+    };
+    try {
+        const { data } = await axios.post<XaiVideoResponse>(aiApiUrl(config, "/videos/generations"), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal });
+        if (!data.request_id) throw new Error(apiText("noVideoTaskId"));
+        return { id: data.request_id, provider: "xai", model };
+    } catch (error) {
+        throw new Error(readAxiosError(error, apiText("videoTaskCreateFailed")));
+    }
+}
+
+async function pollXaiVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
+    try {
+        const { data } = await axios.get<XaiVideoResponse>(aiApiUrl(config, `/videos/${encodeURIComponent(task.id)}`), { headers: aiHeaders(config), signal: options?.signal });
+        if (data.error || ["failed", "expired", "cancelled"].includes(data.status || "")) return { status: "failed", error: readApiErrorMessage(data.error) || apiText("videoGenerationFailed") };
+        if (data.status !== "done") return { status: "pending" };
+        if (!data.video?.url) throw new Error(apiText("noPlayableVideo"));
+        return { status: "completed", result: await videoResultFromUrl(data.video.url, options) };
+    } catch (error) {
+        throw new Error(readAxiosError(error, apiText("videoTaskQueryFailed")));
+    }
 }
 
 async function createPluginVideoTask(config: AiConfig, model: string, script: string, prompt: string, references: ReferenceImage[], options?: VideoMediaOptions): Promise<VideoGenerationTask> {

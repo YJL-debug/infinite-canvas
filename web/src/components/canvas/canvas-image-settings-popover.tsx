@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Settings2 } from "lucide-react";
 import { Button } from "antd";
@@ -10,6 +10,8 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
 
 type CanvasImageSettingsPopoverProps = {
+    children?: ReactNode;
+    showCount?: boolean;
     config: AiConfig;
     onConfigChange: (key: keyof AiConfig, value: string) => void;
     onMissingConfig?: () => void;
@@ -20,7 +22,7 @@ type CanvasImageSettingsPopoverProps = {
     autoAdjustOverflow?: boolean;
 };
 
-export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChange, buttonClassName, placement = "topLeft" }: CanvasImageSettingsPopoverProps) {
+export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChange, buttonClassName, placement = "topLeft", children, showCount = true }: CanvasImageSettingsPopoverProps) {
     const { t } = useTranslation();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const buttonRef = useRef<HTMLSpanElement>(null);
@@ -58,14 +60,14 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
         };
     }, [onOpenChange, open]);
 
-    const panel = open && buttonRect ? <ImageSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} /> : null;
+    const panel = open && buttonRect ? <ImageSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} showCount={showCount} onConfigChange={onConfigChange}>{children}</ImageSettingsPortal> : null;
 
     return (
         <>
             <span ref={buttonRef} className="inline-flex min-w-0">
                 <Button size="small" type="text" className={buttonClassName || "!h-8 !max-w-[180px] !justify-start !rounded-full !px-2.5"} style={{ background: theme.node.fill, color: theme.node.text }} icon={<Settings2 className="size-3.5" />} onClick={() => updateOpen(!open)}>
                     <span className="truncate">
-                        {imageQualityLabel(quality)} · {imageSizeLabel(activeSize)} · {t("canvas.controls.images", { count })}
+                        {imageQualityLabel(quality)} · {imageSizeLabel(activeSize)}{showCount ? ` · ${t("canvas.controls.images", { count })}` : ""}
                     </span>
                 </Button>
             </span>
@@ -75,13 +77,17 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
 }
 
 function ImageSettingsPortal({
+    children,
     buttonRect,
     panelRef,
     placement,
     theme,
     config,
     onConfigChange,
+    showCount,
 }: {
+    children?: ReactNode;
+    showCount: boolean;
     buttonRect: DOMRect;
     panelRef: RefObject<HTMLDivElement | null>;
     placement: CanvasImageSettingsPopoverProps["placement"];
@@ -119,7 +125,8 @@ function ImageSettingsPortal({
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
         >
-            <ImageSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" />
+            {children}
+            <ImageSettingsPanel config={config} showCount={showCount} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" />
         </div>,
         document.body,
     );

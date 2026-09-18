@@ -48,6 +48,7 @@ type CanvasNodeProps = {
     onContentChange: (nodeId: string, content: string) => void;
     onTitleChange: (nodeId: string, title: string) => void;
     onToggleBatch?: (nodeId: string) => void;
+    onBatchEditImages?: (node: CanvasNodeData) => void;
     onSetBatchPrimary?: (nodeId: string, itemId: string) => void;
     onDuplicateBatchImage?: (node: CanvasNodeData, imageId: string) => void;
     onDownloadBatchImage?: (node: CanvasNodeData, imageId: string) => void;
@@ -75,6 +76,7 @@ type NodeContentRendererProps = {
     mentionReferences: CanvasResourceReference[];
     onRetry?: (node: CanvasNodeData) => void;
     onToggleBatch?: () => void;
+    onBatchEditImages?: () => void;
     onSetBatchPrimary?: (itemId: string) => void;
     onDuplicateBatchImage?: (imageId: string) => void;
     onDownloadBatchImage?: (imageId: string) => void;
@@ -113,6 +115,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onContentChange,
     onTitleChange,
     onToggleBatch,
+    onBatchEditImages,
     onSetBatchPrimary,
     onDuplicateBatchImage,
     onDownloadBatchImage,
@@ -417,6 +420,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onStopEditing={() => setIsEditingContent(false)}
                         onRetry={onRetry}
                         onToggleBatch={() => onToggleBatch?.(data.id)}
+                        onBatchEditImages={() => onBatchEditImages?.(data)}
                         onSetBatchPrimary={(itemId) => onSetBatchPrimary?.(data.id, itemId)}
                         onDuplicateBatchImage={(imageId) => onDuplicateBatchImage?.(data, imageId)}
                         onDownloadBatchImage={(imageId) => onDownloadBatchImage?.(data, imageId)}
@@ -677,6 +681,7 @@ function ImageNodeContent(props: NodeContentRendererProps) {
             batchExpanded={props.batchExpanded}
             scale={props.scale}
             onToggleBatch={props.onToggleBatch}
+            onBatchEditImages={props.onBatchEditImages}
             onSetBatchPrimary={props.onSetBatchPrimary}
             onDuplicateBatchImage={props.onDuplicateBatchImage}
             onDownloadBatchImage={props.onDownloadBatchImage}
@@ -736,6 +741,7 @@ function ImageContent({
     batchExpanded,
     scale,
     onToggleBatch,
+    onBatchEditImages,
     onSetBatchPrimary,
     onDuplicateBatchImage,
     onDownloadBatchImage,
@@ -747,6 +753,7 @@ function ImageContent({
     batchExpanded: boolean;
     scale: number;
     onToggleBatch?: () => void;
+    onBatchEditImages?: () => void;
     onSetBatchPrimary?: (imageId: string) => void;
     onDuplicateBatchImage?: (imageId: string) => void;
     onDownloadBatchImage?: (imageId: string) => void;
@@ -778,6 +785,11 @@ function ImageContent({
 
     return (
         <BatchFrame batchCount={batchCount} batchExpanded={batchExpanded}>
+            {isBatchRoot && onBatchEditImages && node.metadata?.status !== "loading" && images.some((image) => image.status === "success") ? (
+                <button type="button" className="pointer-events-none absolute bottom-2.5 left-2.5 z-30 flex h-8 items-center gap-1 rounded-lg px-2 text-xs opacity-0 backdrop-blur-md transition-opacity hover:bg-black/5 group-hover/node:pointer-events-auto group-hover/node:opacity-100 dark:hover:bg-white/10 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100" style={{ color: theme.node.text, background: theme.toolbar.panel }} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onBatchEditImages(); }}>
+                    <Copy className="size-3.5" />{t("canvas.batchEdit.action")}
+                </button>
+            ) : null}
             {batchExpanded
                 ? images
                       .filter((image) => image.id !== primaryImageId)

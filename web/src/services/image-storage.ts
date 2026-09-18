@@ -264,6 +264,8 @@ export async function cleanupUnusedImages(usedData: unknown) {
 export function collectImageStorageKeys(value: unknown, keys = new Set<string>()) {
     if (!value || typeof value !== "object") return keys;
     if ("storageKey" in value && typeof value.storageKey === "string" && value.storageKey.startsWith("image:")) keys.add(value.storageKey);
+    // 编辑结果仍需原图供重试和导出使用，包括图片组中每张结果独立保存的引用。
+    if ("references" in value && Array.isArray(value.references)) value.references.forEach((key) => { if (typeof key === "string" && key.startsWith("image:")) keys.add(key); });
     Object.values(value).forEach((item) => (Array.isArray(item) ? item.forEach((child) => collectImageStorageKeys(child, keys)) : collectImageStorageKeys(item, keys)));
     return keys;
 }
