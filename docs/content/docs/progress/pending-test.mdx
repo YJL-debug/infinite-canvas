@@ -7,6 +7,8 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- Grok 视频：使用 grok-imagine-video 系列模型时，应向 /videos/generations 发送 JSON，按首尾帧或全能参考模式传递图片及所选时长、比例、分辨率；验证 request_id 任务创建、done 状态结果下载、失败提示，以及刷新后按原协议继续查询。检查其他视频模型及自定义脚本的调用不受影响。
+- Grok 视频真实生成仍未通过：部署后使用原图、原提示词和 grok-imagine-video-1.5-preview 实测，cpa 已收到 JSON；转发前后图片和提示词哈希一致，6 秒、1:1、720p 参数保留，cpa 将 preview 别名规范为 grok-imagine-video-1.5。当前上游视频端点返回 Cloudflare 502，随后 cpa 返回关联该错误的 auth_unavailable 503；尚未取得任务编号，真实出片、播放和刷新续查仍待上游恢复后验收。前端类型检查、生产构建及 12 项模拟接口检查已通过。
 - 图片反推工作流：点击图片的「反推提示词」只创建配置，选好模型、推理强度后再手动生成。请求应发送原版 SKILL.md，并通过 read_file 按需提供原版参考文件，不能追加分析描述或 JSON 输出要求；检查摄影任务不会预先载入插画指南。原始 Markdown 回复应保存在配置节点中，中文、英文与负面词仅从原回复提取，结果节点应记录实际使用的模型和推理强度。修改正文后应传入下游生图，取消、缺图或格式不符时应明确处理，刷新后文字与连线应保留。
 - 图片反推真实识图验收未通过：已部署页面使用原始人像图片、cpa 的 grok-4.5 和 high 实测，图片及 Skill 文件哈希、参考文件读取、原始输出保存与节点拆分均正确，但返回的服装和场景与原图不符；同模型不带 Skill 的普通识图对照也错误。请求和响应均标注 high，仍需排查渠道转发或上游模型的实际视觉处理，不能把 HTTP 成功和节点创建成功视作功能验收通过。
 - grok-4.6 对照：同一 cpa 接口对原图和白底红圆的直接识图均正确；最新画布反推也已成功创建三个文本节点和下游生图配置，原始 Markdown 与拆分内容、模型和 high 元数据一致。此前一轮出现 network error，现有日志不足以确认具体断流位置；网络稳定性及模型严格遵循原 Skill 的条目数量仍待用户确认。
