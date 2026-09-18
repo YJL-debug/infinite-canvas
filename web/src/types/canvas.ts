@@ -25,8 +25,12 @@ export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
 export type CanvasImageGenerationType = "generation" | "edit";
 
+export type RandomImageVariation = { character: string; style: string };
+
 export type CanvasNodeImage = {
     id: string;
+    prompt?: string;
+    randomImageVariation?: RandomImageVariation;
     status: CanvasNodeStatus;
     errorDetails?: string;
     content: string;
@@ -45,6 +49,10 @@ export type CanvasNodeText = {
 };
 
 export type CanvasNodeMetadata = {
+    randomizeImage?: boolean;
+    lastRandomImageVariation?: RandomImageVariation;
+    randomImageVariation?: RandomImageVariation;
+    originalPrompt?: string;
     content?: string;
     composerContent?: string;
     prompt?: string;

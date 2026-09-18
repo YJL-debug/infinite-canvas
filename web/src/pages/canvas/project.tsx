@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { requestReversePrompt } from "@/services/api/reverse-prompt";
 import { createReversePromptOutputs, parseReversePrompt } from "@/lib/canvas/canvas-reverse-prompt";
+import { createRandomImagePrompts } from "@/lib/canvas/random-image-prompt";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { createVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
 import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -1731,6 +1732,8 @@ function InfiniteCanvasPage() {
                         bytes: image.bytes,
                         mimeType: image.mimeType,
                         primaryImageId: image.id,
+                        prompt: image.prompt ?? node.metadata?.prompt,
+                        randomImageVariation: image.randomImageVariation,
                     },
                 };
             }),
@@ -1757,7 +1760,9 @@ function InfiniteCanvasPage() {
                 bytes: image.bytes,
                 mimeType: image.mimeType,
                 status: NODE_STATUS_SUCCESS,
-                prompt: node.metadata?.prompt,
+                prompt: image.prompt ?? node.metadata?.prompt,
+                originalPrompt: node.metadata?.originalPrompt,
+                randomImageVariation: image.randomImageVariation,
                 generationType: node.metadata?.generationType,
                 model: node.metadata?.model,
                 size: node.metadata?.size,
@@ -2373,6 +2378,8 @@ function InfiniteCanvasPage() {
                             ? [{ id: sourceNode.id, name: `${sourceNode.title || sourceNode.id}.png`, type: sourceNode.metadata.mimeType || "image/png", dataUrl: sourceNode.metadata.content, storageKey: sourceNode.metadata.storageKey }]
                             : [];
                     const referenceImages = [...new Map([...sourceReference, ...generationContext.referenceImages].map((image) => [image.id, image])).values()];
+                    if (sourceNode?.metadata?.randomizeImage && referenceImages.length) throw new Error(t("canvas.randomImage.textOnly"));
+                    const randomPrompts = sourceNode?.metadata?.randomizeImage ? createRandomImagePrompts(effectivePrompt, count, sourceNode.metadata.lastRandomImageVariation) : undefined;
                     const generationType = referenceImages.length ? ("edit" as const) : ("generation" as const);
                     const generationMetadata = buildImageGenerationMetadata(generationType, generationConfig, count, referenceImages);
                     const parentConfig = NODE_DEFAULT_SIZE[isConfigNode ? CanvasNodeType.Config : isImageNode ? CanvasNodeType.Image : CanvasNodeType.Text];
@@ -2380,6 +2387,7 @@ function InfiniteCanvasPage() {
                     const parentPosition = sourceNode?.position || { x: 0, y: 0 };
                     const rootId = isEmptyImageNode ? nodeId : nanoid();
                     const imageIds = Array.from({ length: count }, () => nanoid());
+                    const imageJobs = imageIds.map((id, index) => ({ id, prompt: randomPrompts?.[index].prompt ?? effectivePrompt, randomImageVariation: randomPrompts?.[index].variation }));
                     pendingChildIds = [rootId];
                     const rootNode: CanvasNodeData = {
                         id: rootId,
@@ -2392,9 +2400,11 @@ function InfiniteCanvasPage() {
                         width: isEmptyImageNode ? sourceNode?.width || imageConfig.width : imageConfig.width,
                         height: isEmptyImageNode ? sourceNode?.height || imageConfig.height : imageConfig.height,
                         metadata: {
-                            prompt: effectivePrompt,
+                            prompt: imageJobs[0].prompt,
+                            originalPrompt: randomPrompts ? effectivePrompt : undefined,
+                            randomImageVariation: imageJobs[0].randomImageVariation,
                             status: NODE_STATUS_LOADING,
-                            images: imageIds.map((id) => ({ id, status: NODE_STATUS_LOADING, content: "", naturalWidth: 0, naturalHeight: 0, bytes: 0, mimeType: "" })),
+                            images: imageJobs.map((job) => ({ ...job, status: NODE_STATUS_LOADING, content: "", naturalWidth: 0, naturalHeight: 0, bytes: 0, mimeType: "" })),
                             ...generationMetadata,
                         },
                     };
@@ -2405,7 +2415,7 @@ function InfiniteCanvasPage() {
                                 ? isConfigNode
                                     ? {
                                           ...node,
-                                          metadata: { ...node.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined },
+                                          metadata: { ...node.metadata, ...(randomPrompts ? { lastRandomImageVariation: randomPrompts[randomPrompts.length - 1].variation } : {}), status: NODE_STATUS_LOADING, errorDetails: undefined },
                                       }
                                     : isEmptyImageNode
                                       ? {
@@ -2443,14 +2453,15 @@ function InfiniteCanvasPage() {
                     let hasFailure = false;
                     let firstError = "";
                     await Promise.all(
-                        imageIds.map(async (imageId) => {
+                        imageJobs.map(async (job) => {
+                            const imageId = job.id;
                             try {
                                 const image = referenceImages.length
-                                    ? await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, { signal: controller.signal }).then((items) => items[0])
-                                    : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, { signal: controller.signal }).then((items) => items[0]);
+                                    ? await requestEdit({ ...generationConfig, count: "1" }, job.prompt, referenceImages, { signal: controller.signal }).then((items) => items[0])
+                                    : await requestGeneration({ ...generationConfig, count: "1" }, job.prompt, { signal: controller.signal }).then((items) => items[0]);
                                 const uploaded = await uploadImage(image.dataUrl, { signal: controller.signal });
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
-                                const item: CanvasNodeImage = { id: imageId, status: NODE_STATUS_SUCCESS, content: uploaded.url, storageKey: uploaded.storageKey, naturalWidth: uploaded.width, naturalHeight: uploaded.height, bytes: uploaded.bytes, mimeType: uploaded.mimeType };
+                                const item: CanvasNodeImage = { ...job, status: NODE_STATUS_SUCCESS, content: uploaded.url, storageKey: uploaded.storageKey, naturalWidth: uploaded.width, naturalHeight: uploaded.height, bytes: uploaded.bytes, mimeType: uploaded.mimeType };
                                 setNodes((prev) =>
                                     prev.map((node) => {
                                         if (node.id !== rootId) return node;
@@ -2471,6 +2482,8 @@ function InfiniteCanvasPage() {
                                                 mimeType: item.mimeType,
                                                 images,
                                                 primaryImageId: imageId,
+                                                prompt: job.prompt,
+                                                randomImageVariation: job.randomImageVariation,
                                             },
                                         };
                                     }),
@@ -2777,7 +2790,9 @@ function InfiniteCanvasPage() {
             }
 
             const context = hasSavedImageMetadata ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, sourceNode.metadata?.prompt || node.metadata?.prompt || ""));
-            const prompt = (savedImageMetadata?.prompt || context?.prompt || "").trim();
+            // 批量图片可能各自使用不同的随机设定；重试应复用目标图的请求，而非当前主图的请求。
+            const savedImage = savedImageMetadata?.images?.find((image) => image.id === (imageId || savedImageMetadata.primaryImageId));
+            const prompt = (savedImage?.prompt || savedImageMetadata?.prompt || context?.prompt || "").trim();
             if (!prompt) {
                 message.warning(t("canvas.projectPage.retryPromptMissing"));
                 return;
@@ -2837,6 +2852,8 @@ function InfiniteCanvasPage() {
                 const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                 const retryImage: CanvasNodeImage = {
                     id: imageId || node.metadata?.primaryImageId || nanoid(),
+                    prompt,
+                    randomImageVariation: savedImage?.randomImageVariation ?? savedImageMetadata?.randomImageVariation,
                     status: NODE_STATUS_SUCCESS,
                     content: uploadedImage.url,
                     storageKey: uploadedImage.storageKey,
@@ -2859,7 +2876,7 @@ function InfiniteCanvasPage() {
                 setNodes((prev) =>
                     prev.map((item) => {
                         if (item.id !== node.id) return item;
-                        const makePrimary = !imageId || !item.metadata?.content;
+                        const makePrimary = !imageId || !item.metadata?.content || item.metadata?.primaryImageId === imageId;
                         const edge = imageId ? Math.max(item.width, item.height) : 0;
                         const imageSize = imageId && item.metadata?.freeResize ? { width: item.width, height: item.height } : imageId ? fitNodeSize(uploadedImage.width, uploadedImage.height, edge, edge) : fitNodeSize(uploadedImage.width, uploadedImage.height, imageConfig.width, imageConfig.height);
                         return {
@@ -2871,7 +2888,7 @@ function InfiniteCanvasPage() {
                                 ...(makePrimary ? imageMetadata(uploadedImage) : { status: NODE_STATUS_SUCCESS }),
                                 images: item.metadata?.images?.map((current) => (current.id === retryImage.id ? retryImage : current)),
                                 primaryImageId: makePrimary ? retryImage.id : item.metadata?.primaryImageId,
-                                prompt,
+                                ...(makePrimary ? { prompt, randomImageVariation: retryImage.randomImageVariation } : {}),
                                 ...generationMetadata,
                             },
                         };
