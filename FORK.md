@@ -1,6 +1,6 @@
 # 本地定制版维护
 
-本 fork 基于 `basketikun/infinite-canvas`。`custom` 分支维护图片反推等自己的修改，`main` 保留上游基线。当前反推功能基于上游 v0.18.0，使用原版 GPT-Image2-Skill 指令与按需读取的参考文件。
+本 fork 基于 `basketikun/infinite-canvas`。`custom` 分支维护图片反推等自己的修改，`main` 保留上游基线。当前定制版已合并上游 v0.19.0，反推功能，使用原版 GPT-Image2-Skill 指令与按需读取的参考文件。
 
 远程仓库：
 
