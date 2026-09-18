@@ -786,7 +786,7 @@ function ImageContent({
     return (
         <BatchFrame batchCount={batchCount} batchExpanded={batchExpanded}>
             {isBatchRoot && onBatchEditImages && node.metadata?.status !== "loading" && images.some((image) => image.status === "success") ? (
-                <button type="button" className="pointer-events-none absolute bottom-2.5 left-2.5 z-30 flex h-8 items-center gap-1 rounded-lg px-2 text-xs opacity-0 backdrop-blur-md transition-opacity hover:bg-black/5 group-hover/node:pointer-events-auto group-hover/node:opacity-100 dark:hover:bg-white/10" style={{ color: theme.node.text, background: theme.toolbar.panel }} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onBatchEditImages(); }}>
+                <button type="button" className="pointer-events-none absolute bottom-2.5 left-2.5 z-30 flex h-8 items-center gap-1 rounded-lg px-2 text-xs opacity-0 backdrop-blur-md transition-opacity hover:bg-black/5 group-hover/node:pointer-events-auto group-hover/node:opacity-100 dark:hover:bg-white/10 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100" style={{ color: theme.node.text, background: theme.toolbar.panel }} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onBatchEditImages(); }}>
                     <Copy className="size-3.5" />{t("canvas.batchEdit.action")}
                 </button>
             ) : null}
