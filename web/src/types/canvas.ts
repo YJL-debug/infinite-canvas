@@ -29,6 +29,9 @@ export type RandomImageVariation = { character: string; style: string };
 
 export type CanvasNodeImage = {
     id: string;
+    references?: string[];
+    sourceImageId?: string;
+    sourceImageIndex?: number;
     prompt?: string;
     randomImageVariation?: RandomImageVariation;
     status: CanvasNodeStatus;
@@ -49,6 +52,9 @@ export type CanvasNodeText = {
 };
 
 export type CanvasNodeMetadata = {
+    batchEditImages?: boolean;
+    sourceImageId?: string;
+    sourceImageIndex?: number;
     randomizeImage?: boolean;
     lastRandomImageVariation?: RandomImageVariation;
     randomImageVariation?: RandomImageVariation;

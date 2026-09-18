@@ -9,6 +9,7 @@ import { requestEdit, requestGeneration, requestImageQuestion } from "@/services
 import { requestReversePrompt } from "@/services/api/reverse-prompt";
 import { createReversePromptOutputs, parseReversePrompt } from "@/lib/canvas/canvas-reverse-prompt";
 import { createRandomImagePrompts } from "@/lib/canvas/random-image-prompt";
+import { batchEditSources } from "@/lib/canvas/batch-image-edit";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { createVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
 import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -51,7 +52,7 @@ import { useAgentBridge } from "@/pages/canvas/hooks/use-agent-bridge";
 import { usePluginHost } from "@/pages/canvas/hooks/use-plugin-host";
 import { buildNodeMentionReferences, getGroupResourceNodes, isCanvasReferenceNode, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
-import { applyNodeConfigPatch, audioMetadata, buildAudioGenerationMetadata, buildImageGenerationMetadata, createCanvasNode, imageMetadata, videoMetadata } from "@/lib/canvas/canvas-node-factory";
+import { applyNodeConfigPatch, audioMetadata, buildAudioGenerationMetadata, buildImageGenerationMetadata, createCanvasNode, imageMetadata, referenceUrl, videoMetadata } from "@/lib/canvas/canvas-node-factory";
 import { applyGroupSelection, applyUngroupSelection, canGroupSelectedNodes, canUngroupSelectedNodes, collectGroupMemberNodes, findContainingGroupId, findGroupDropTarget, getConnectionTargetAnchor, getGroupWrapRect, normalizeConnection, snapNodesIntoGroup } from "@/lib/canvas/canvas-node-geometry";
 import {
     audioExtension,
@@ -1734,6 +1735,9 @@ function InfiniteCanvasPage() {
                         primaryImageId: image.id,
                         prompt: image.prompt ?? node.metadata?.prompt,
                         randomImageVariation: image.randomImageVariation,
+                        references: image.references ?? node.metadata?.references,
+                        sourceImageId: image.sourceImageId,
+                        sourceImageIndex: image.sourceImageIndex,
                     },
                 };
             }),
@@ -1763,12 +1767,14 @@ function InfiniteCanvasPage() {
                 prompt: image.prompt ?? node.metadata?.prompt,
                 originalPrompt: node.metadata?.originalPrompt,
                 randomImageVariation: image.randomImageVariation,
+                sourceImageId: image.sourceImageId,
+                sourceImageIndex: image.sourceImageIndex,
                 generationType: node.metadata?.generationType,
                 model: node.metadata?.model,
                 size: node.metadata?.size,
                 quality: node.metadata?.quality,
                 background: node.metadata?.background,
-                references: node.metadata?.references,
+                references: image.references ?? node.metadata?.references,
             },
         };
         setNodes((prev) => [...prev, copy]);
@@ -1784,6 +1790,12 @@ function InfiniteCanvasPage() {
     const handleConfigNodeChange = useCallback((nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyNodeConfigPatch(node, patch) : node)));
     }, []);
+
+    const openBatchImageEdit = useCallback((node: CanvasNodeData) => {
+        handleConfigNodeChange(node.id, { batchEditImages: true, composerContent: node.metadata?.composerContent ?? "" });
+        setSelectedNodeIds(new Set([node.id]));
+        setDialogNodeId(node.id);
+    }, [handleConfigNodeChange]);
 
     const downloadNodeImage = useCallback((node: CanvasNodeData) => {
         if ((node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) || !node.metadata?.content) return;
@@ -2369,25 +2381,31 @@ function InfiniteCanvasPage() {
                 if (markSourceStatus) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...(node.type === CanvasNodeType.Config ? {} : { prompt }), status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)));
 
                 if (mode === "image") {
-                    const count = getGenerationCount(generationConfig.count);
                     const isConfigNode = sourceNode?.type === CanvasNodeType.Config;
                     const isImageNode = sourceNode?.type === CanvasNodeType.Image;
                     const isEmptyImageNode = isImageNode && !sourceNode?.metadata?.content;
+                    const batchEdit = isImageNode && Boolean(sourceNode?.metadata?.batchEditImages && sourceNode.metadata.content && (sourceNode.metadata.images?.length || 0) > 1);
+                    const batchSources = batchEdit ? batchEditSources(sourceNode) : [];
+                    if (batchEdit && !batchSources.length) throw new Error(t("canvas.batchEdit.noImages"));
+                    if (batchEdit && !effectivePrompt) throw new Error(t("canvas.batchEdit.promptRequired"));
+                    const count = batchEdit ? batchSources.length : getGenerationCount(generationConfig.count);
                     const sourceReference =
-                        isImageNode && sourceNode?.metadata?.content
+                        !batchEdit && isImageNode && sourceNode?.metadata?.content
                             ? [{ id: sourceNode.id, name: `${sourceNode.title || sourceNode.id}.png`, type: sourceNode.metadata.mimeType || "image/png", dataUrl: sourceNode.metadata.content, storageKey: sourceNode.metadata.storageKey }]
                             : [];
                     const referenceImages = [...new Map([...sourceReference, ...generationContext.referenceImages].map((image) => [image.id, image])).values()];
-                    if (sourceNode?.metadata?.randomizeImage && referenceImages.length) throw new Error(t("canvas.randomImage.textOnly"));
+                    if (sourceNode?.metadata?.randomizeImage && (batchEdit || referenceImages.length)) throw new Error(t("canvas.randomImage.textOnly"));
                     const randomPrompts = sourceNode?.metadata?.randomizeImage ? createRandomImagePrompts(effectivePrompt, count, sourceNode.metadata.lastRandomImageVariation) : undefined;
-                    const generationType = referenceImages.length ? ("edit" as const) : ("generation" as const);
+                    const generationType = batchEdit || referenceImages.length ? ("edit" as const) : ("generation" as const);
                     const generationMetadata = buildImageGenerationMetadata(generationType, generationConfig, count, referenceImages);
                     const parentConfig = NODE_DEFAULT_SIZE[isConfigNode ? CanvasNodeType.Config : isImageNode ? CanvasNodeType.Image : CanvasNodeType.Text];
                     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                     const parentPosition = sourceNode?.position || { x: 0, y: 0 };
                     const rootId = isEmptyImageNode ? nodeId : nanoid();
                     const imageIds = Array.from({ length: count }, () => nanoid());
-                    const imageJobs = imageIds.map((id, index) => ({ id, prompt: randomPrompts?.[index].prompt ?? effectivePrompt, randomImageVariation: randomPrompts?.[index].variation }));
+                    // 每个任务只带对应原图及用户额外引用；持久化存储键，确保刷新后的单张重试仍能找到同一张原图。
+                    const requestReferences = imageIds.map((_, index) => batchEdit ? [...new Map([batchSources[index], ...referenceImages].map((image) => [image.id, image])).values()] : referenceImages);
+                    const imageJobs = imageIds.map((id, index) => ({ id, prompt: randomPrompts?.[index].prompt ?? effectivePrompt, randomImageVariation: randomPrompts?.[index].variation, references: requestReferences[index].map(referenceUrl).filter((url): url is string => Boolean(url)), sourceImageId: batchSources[index]?.id, sourceImageIndex: batchSources[index]?.sourceIndex }));
                     pendingChildIds = [rootId];
                     const rootNode: CanvasNodeData = {
                         id: rootId,
@@ -2406,6 +2424,9 @@ function InfiniteCanvasPage() {
                             status: NODE_STATUS_LOADING,
                             images: imageJobs.map((job) => ({ ...job, status: NODE_STATUS_LOADING, content: "", naturalWidth: 0, naturalHeight: 0, bytes: 0, mimeType: "" })),
                             ...generationMetadata,
+                            references: imageJobs[0].references,
+                            sourceImageId: imageJobs[0].sourceImageId,
+                            sourceImageIndex: imageJobs[0].sourceImageIndex,
                         },
                     };
 
@@ -2453,11 +2474,12 @@ function InfiniteCanvasPage() {
                     let hasFailure = false;
                     let firstError = "";
                     await Promise.all(
-                        imageJobs.map(async (job) => {
+                        imageJobs.map(async (job, index) => {
                             const imageId = job.id;
                             try {
-                                const image = referenceImages.length
-                                    ? await requestEdit({ ...generationConfig, count: "1" }, job.prompt, referenceImages, { signal: controller.signal }).then((items) => items[0])
+                                const jobReferences = requestReferences[index];
+                                const image = jobReferences.length
+                                    ? await requestEdit({ ...generationConfig, count: "1" }, job.prompt, jobReferences, { signal: controller.signal }).then((items) => items[0])
                                     : await requestGeneration({ ...generationConfig, count: "1" }, job.prompt, { signal: controller.signal }).then((items) => items[0]);
                                 const uploaded = await uploadImage(image.dataUrl, { signal: controller.signal });
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
@@ -2484,6 +2506,9 @@ function InfiniteCanvasPage() {
                                                 primaryImageId: imageId,
                                                 prompt: job.prompt,
                                                 randomImageVariation: job.randomImageVariation,
+                                                references: job.references,
+                                                sourceImageId: job.sourceImageId,
+                                                sourceImageIndex: job.sourceImageIndex,
                                             },
                                         };
                                     }),
@@ -2800,7 +2825,7 @@ function InfiniteCanvasPage() {
             const generationType = savedImageMetadata?.generationType;
             const useReferenceImages = generationType ? generationType === "edit" : Boolean(context?.referenceImages.length);
             const retryReferenceImages =
-                hasSavedImageMetadata && savedImageMetadata ? await resolveMetadataReferences(savedImageMetadata) : useReferenceImages ? (context?.referenceImages.length ? context.referenceImages : sourceNodeReferenceImages(sourceNode)) : [];
+                hasSavedImageMetadata && savedImageMetadata ? await resolveMetadataReferences({ ...savedImageMetadata, references: savedImage?.references ?? savedImageMetadata.references }) : useReferenceImages ? (context?.referenceImages.length ? context.referenceImages : sourceNodeReferenceImages(sourceNode)) : [];
             if (useReferenceImages && !retryReferenceImages) {
                 message.error(t("canvas.projectPage.referenceMissing"));
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: item.metadata?.content ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: item.metadata?.content ? undefined : t("canvas.projectPage.referenceMissing"), images: item.metadata?.images?.map((image) => (image.id === imageId ? { ...image, status: NODE_STATUS_ERROR, errorDetails: t("canvas.projectPage.referenceMissing") } : image)) } } : item)));
@@ -2854,6 +2879,9 @@ function InfiniteCanvasPage() {
                     id: imageId || node.metadata?.primaryImageId || nanoid(),
                     prompt,
                     randomImageVariation: savedImage?.randomImageVariation ?? savedImageMetadata?.randomImageVariation,
+                    references: retryImages.map(referenceUrl).filter((url): url is string => Boolean(url)),
+                    sourceImageId: savedImage?.sourceImageId ?? savedImageMetadata?.sourceImageId,
+                    sourceImageIndex: savedImage?.sourceImageIndex ?? savedImageMetadata?.sourceImageIndex,
                     status: NODE_STATUS_SUCCESS,
                     content: uploadedImage.url,
                     storageKey: uploadedImage.storageKey,
@@ -2870,7 +2898,7 @@ function InfiniteCanvasPage() {
                           quality: generationConfig.quality,
                           ...(generationConfig.background ? { background: generationConfig.background } : {}),
                           count: savedImageMetadata.count || 1,
-                          references: savedImageMetadata.references,
+                          references: savedImage?.references ?? savedImageMetadata.references,
                       }
                     : buildImageGenerationMetadata(useReferenceImages ? "edit" : "generation", generationConfig, 1, retryImages);
                 setNodes((prev) =>
@@ -2888,8 +2916,8 @@ function InfiniteCanvasPage() {
                                 ...(makePrimary ? imageMetadata(uploadedImage) : { status: NODE_STATUS_SUCCESS }),
                                 images: item.metadata?.images?.map((current) => (current.id === retryImage.id ? retryImage : current)),
                                 primaryImageId: makePrimary ? retryImage.id : item.metadata?.primaryImageId,
-                                ...(makePrimary ? { prompt, randomImageVariation: retryImage.randomImageVariation } : {}),
                                 ...generationMetadata,
+                                ...(makePrimary ? { prompt, randomImageVariation: retryImage.randomImageVariation, references: retryImage.references, sourceImageId: retryImage.sourceImageId, sourceImageIndex: retryImage.sourceImageIndex } : { references: item.metadata?.references }),
                             },
                         };
                     }),
@@ -3240,6 +3268,7 @@ function InfiniteCanvasPage() {
                             onContentChange={handleNodeContentChange}
                             onTitleChange={handleNodeTitleChange}
                             onToggleBatch={toggleBatchExpanded}
+                            onBatchEditImages={openBatchImageEdit}
                             onSetBatchPrimary={setBatchPrimary}
                             onDuplicateBatchImage={duplicateBatchImage}
                             onDownloadBatchImage={downloadBatchImage}

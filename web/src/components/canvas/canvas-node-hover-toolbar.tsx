@@ -269,6 +269,7 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
                             {batchCount > 1 ? <InfoRow label={t("canvas.nodeToolbar.imageGroup")} value={t("canvas.configNode.images", { count: batchCount })} /> : null}
                             {node.metadata?.prompt ? <InfoRow label={t("canvas.configNode.prompt")} value={node.metadata.prompt} /> : null}
                             {node.metadata?.originalPrompt ? <InfoRow label={t("canvas.randomImage.originalPrompt")} value={node.metadata.originalPrompt} /> : null}
+                            {node.metadata?.sourceImageIndex ? <InfoRow label={t("canvas.batchEdit.source")} value={t("canvas.batchEdit.sourceNumber", { index: node.metadata.sourceImageIndex })} /> : null}
                             {node.metadata?.randomImageVariation ? <InfoRow label={t("canvas.randomImage.settings")} value={`${node.metadata.randomImageVariation.character}\n${node.metadata.randomImageVariation.style}`} /> : null}
                             {node.metadata?.videoTaskId ? <InfoRow label={t("canvas.nodeToolbar.videoTaskId")} value={node.metadata.videoTaskId} /> : null}
                             {imageBytes ? <InfoRow label={t("canvas.nodeToolbar.imageSize")} value={formatBytes(imageBytes)} /> : null}
